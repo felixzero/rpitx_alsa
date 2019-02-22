@@ -1,5 +1,12 @@
 /*
+ * rpitx_alsa module
+ * Author: Kevin "felixzero" Guilloy, F4VQG
  * 
+ * This file handles the ALSA PCM interface. It declares one device with 2 PCMs:
+ *  - number 0 is stereo only and takes I-Q samples
+ *  - number 1 is mono only and takes (already pre-filtered) USB samples
+ * 
+ * This file is licensed under GNU GPL v3.
  */
 
 #include <linux/platform_device.h>
@@ -11,17 +18,25 @@
 
 /* Basic configuration */
 #define SND_RPITX_DRIVER "snd_rpitx"
-#define MAX_BUFFER (256 * 8)
+
+/* Buffer size definition */
+#define NUMBER_OF_PERIODS 8
+#define MAX_BUFFER (PERIOD_BYTES * NUMBER_OF_PERIODS)
+
+/* Device names definition */
 #define SND_DRIVER_NAME "snd_rpitx"
 #define SND_CARD_NAME "rpitx"
 #define STEREO_IQ_DEVICE_NAME "sendiq"
 #define MONO_USB_DEVICE_NAME "usbdata"
 
+/* Arrays needed for ALSA */
 static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;
 static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;
 static int enable[SNDRV_CARDS] = {1, [1 ... (SNDRV_CARDS - 1)] = 0};
 static struct platform_device *devices[SNDRV_CARDS];
 
+
+/* PCM configuration for stereo (I-Q) */
 static struct snd_pcm_hardware rpitx_pcm_stereo_hw =
 {
     .info = SNDRV_PCM_INFO_INTERLEAVED,
@@ -32,12 +47,13 @@ static struct snd_pcm_hardware rpitx_pcm_stereo_hw =
     .channels_min = 2,
     .channels_max = 2,
     .buffer_bytes_max = MAX_BUFFER,
-    .period_bytes_min = 48,
-    .period_bytes_max = 48,
+    .period_bytes_min = PERIOD_BYTES,
+    .period_bytes_max = PERIOD_BYTES,
     .periods_min = 1,
-    .periods_max = 32,
+    .periods_max = NUMBER_OF_PERIODS,
 };
 
+/* PCM configuration for mono (USB) */
 static struct snd_pcm_hardware rpitx_pcm_mono_hw =
 {
     .info = SNDRV_PCM_INFO_INTERLEAVED,
@@ -48,12 +64,16 @@ static struct snd_pcm_hardware rpitx_pcm_mono_hw =
     .channels_min = 1,
     .channels_max = 1,
     .buffer_bytes_max = MAX_BUFFER,
-    .period_bytes_min = 256,
-    .period_bytes_max = 256,
+    .period_bytes_min = PERIOD_BYTES / 2,
+    .period_bytes_max = PERIOD_BYTES / 2,
     .periods_min = 1,
-    .periods_max = 8,
+    .periods_max = NUMBER_OF_PERIODS * 2,
 };
 
+
+/* Structure definition for "private" date.
+ * Those are passed to ALSA and are accessible within callbacks.
+ */
 struct rpitx_private_data
 {
     struct mutex cable_lock;
@@ -69,13 +89,8 @@ struct rpitx_device
     int is_mono_usb_open;
 };
 
+/* Global state variables */
 struct rpitx_device *mydev;
-
-/*static struct {
-    struct mutex lock;
-    size_t size;
-    char data[MAX_BUFFER];
-} internal_buffer;*/
 size_t buffer_hw_pointer = 0;
 
 /* Free callback, unused */
@@ -89,11 +104,13 @@ static struct snd_device_ops dev_ops =
     .dev_free = rpitx_pcm_dev_free,
 };
 
+
 /* === Common callback functions === */
 
 /* Allocation callbacks */
 static int rpitx_hw_params(struct snd_pcm_substream *ss, struct snd_pcm_hw_params *hw_params)
 {
+    /* We let ALSA handle allocation. */
     return snd_pcm_lib_malloc_pages(ss, params_buffer_bytes(hw_params));
 }
 
@@ -125,21 +142,9 @@ static int rpitx_pcm_trigger(struct snd_pcm_substream *ss, int cmd)
 /* Pointer callback returns the size of the used buffer */
 static snd_pcm_uframes_t rpitx_pcm_pointer(struct snd_pcm_substream *ss)
 {
-   /* struct snd_pcm_runtime *runtime = ss->runtime;
-    if (!runtime)
-        return 0;
-    return runtime->dma_bytes;*/
-    // FIXME Actually handle non emptied buffer.
-    //return mysubstream->runtime->dma_bytes;
-//    struct rpitx_private_data *pdata = ss->private_data;
-//    struct snd_pcm_runtime *runtime = ss->runtime;
-//    return bytes_to_frames(runtime, internal_buffer.size);
-   // if (pdata->is_stereo)
-//        return internal_buffer.size;
-   // else
-     //   return internal_buffer.size/2; // FIXME Sample size
     return buffer_hw_pointer;
 }
+
 
 /* === Differentiated callback functions === */
 
@@ -186,7 +191,7 @@ static int rpitx_pcm_open_mono(struct snd_pcm_substream *ss)
 
 static struct snd_pcm_ops rpitx_pcm_ops_stereo =
 {
-    .open = rpitx_pcm_open_stereo,
+    .open = rpitx_pcm_open_stereo, /* Only difference */
     .close = rpitx_pcm_close,
     .ioctl = snd_pcm_lib_ioctl,
     .hw_params = rpitx_hw_params,
@@ -198,7 +203,7 @@ static struct snd_pcm_ops rpitx_pcm_ops_stereo =
 
 static struct snd_pcm_ops rpitx_pcm_ops_mono =
 {
-    .open = rpitx_pcm_open_mono,
+    .open = rpitx_pcm_open_mono, /* Only difference */
     .close = rpitx_pcm_close,
     .ioctl = snd_pcm_lib_ioctl,
     .hw_params = rpitx_hw_params,
@@ -340,10 +345,6 @@ int rpitx_init_alsa_system(void)
         rpitx_unregister_alsa();
         return -ENODEV;
     }
-    
-    // FIXME: mutex on buffer
-    //mutex_init(&internal_buffer.lock);
-    //internal_buffer.size = 0;
 
     return 0;
 }
@@ -361,41 +362,11 @@ void rpitx_unregister_alsa(void)
 
 ssize_t rpitx_read_bytes_from_alsa_buffer(char *buffer, size_t len)
 {
-    /*int err, i;
-    size_t size_to_read;
-    
-    len -= len % 4;
-    
-    mutex_lock(&internal_buffer.lock);
-    
-    size_to_read = min(internal_buffer.size, len);
-    
-    err = copy_to_user(buffer, internal_buffer.data, size_to_read);
-    if (err != 0)
-        return -EINVAL;
-    
-    for (i = 0; i < internal_buffer.size - size_to_read; i++) {
-        internal_buffer.data[i] = internal_buffer.data[size_to_read + i];
-    }
-    
-    internal_buffer.size = internal_buffer.size - size_to_read;
-    
-    mutex_unlock(&internal_buffer.lock);
-    
-    if (mydev->is_stereo_iq_open)
-        snd_pcm_period_elapsed(mydev->stereo_iq_private_data.substream);
-    if (mydev->is_mono_usb_open)
-        snd_pcm_period_elapsed(mydev->mono_usb_private_data.substream);
-    
-    return size_to_read;*/
-    
     unsigned long available_frames;
     int err, i;
     struct snd_pcm_substream *ss = NULL;
     
-    if (len < 256)
-        return 0;
-    
+    /* Pick the correct structure, depending on the open device */
     if (mydev->is_stereo_iq_open)
         ss = mydev->stereo_iq_private_data.substream;
     else if (mydev->is_mono_usb_open)
@@ -403,27 +374,34 @@ ssize_t rpitx_read_bytes_from_alsa_buffer(char *buffer, size_t len)
     else
         return 0;
     
-    available_frames = snd_pcm_playback_hw_avail(ss->runtime);
-    
-    if (available_frames == 0)
+    /* We don't copy anything if the call doesn't ask for at least a period */
+    if (len < PERIOD_BYTES)
         return 0;
     
-    printk("Read available frames: %d", available_frames);
+    /* If the buffer is not full enough, we don't read. */
+    available_frames = snd_pcm_playback_hw_avail(ss->runtime);
+    if ((mydev->is_stereo_iq_open) && (available_frames < PERIOD_BYTES))
+        return 0;
+    else if (available_frames < PERIOD_BYTES / 2)
+        return 0;
+
+    /* We do the actual copy */
+    if (mydev->is_stereo_iq_open) {
+        err = copy_to_user(buffer, ss->runtime->dma_area + buffer_hw_pointer, PERIOD_BYTES);
+        buffer_hw_pointer += PERIOD_BYTES;
+    } else {
+        for (i = 0; i < PERIOD_BYTES / 2; i++) {
+            put_user(ss->runtime->dma_area[buffer_hw_pointer], buffer + 2*i);   /* I = S */
+            put_user(0, buffer + 2*i + 1);                                      /* Q = 0 */
+            buffer_hw_pointer++;
+        }
+    }
     
-    buffer_hw_pointer += 256;
-    //buffer_hw_pointer += available_frames;
-    //if (buffer_hw_pointer >= MAX_BUFFER)
-        buffer_hw_pointer %= MAX_BUFFER;
+    buffer_hw_pointer %= MAX_BUFFER;
     
-    //err = copy_to_user(buffer, ss->runtime->dma_area, ss->runtime->dma_bytes);
-    
+    /* We tell ALSA we have emptied some of the buffer */
     snd_pcm_period_elapsed(ss);
     
-    err = copy_to_user(buffer, ss->runtime->dma_area + buffer_hw_pointer, 256);
-    
-    //for (i = 0; i < 256; i++)
-    //    buffer[i] = 'z';
-    return 256;
+    return PERIOD_BYTES;
 }
-
 

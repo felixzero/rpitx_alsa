@@ -1,5 +1,11 @@
 /*
- * ...
+ * rpitx_alsa module
+ * Author: Kevin "felixzero" Guilloy, F4VQG
+ * 
+ * This file declares the module to the kernel.
+ * It also handles the /dev/rpitxin device (its output).
+ * 
+ * This file is licensed under GNU GPL v3.
  */
 
 #include <linux/module.h>
@@ -8,9 +14,11 @@
 
 #include "alsa_handling.h"
 
+/* Name definition */
 #define CHARDEV_NAME "rpitxin"
 #define CLASS_NAME "rpitx"
 
+/* Module definition */
 MODULE_AUTHOR("Kevin Guilloy");
 MODULE_DESCRIPTION("ALSA module for rpitx");
 MODULE_LICENSE("GPL");
