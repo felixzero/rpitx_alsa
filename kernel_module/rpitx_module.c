@@ -13,6 +13,7 @@
 #include <linux/platform_device.h>
 
 #include "alsa_handling.h"
+#include "sysfs_variable.h"
 
 /* Name definition */
 #define CHARDEV_NAME "rpitxin"
@@ -102,6 +103,10 @@ static int __init alsa_card_rpitx_init(void)
     if (err < 0)
         return err;
     
+    err = rpitx_init_sysfs_variables();
+    if (err < 0)
+        return err;
+    
     return 0;
 }
 
@@ -109,6 +114,7 @@ static void __exit alsa_card_rpitx_exit(void)
 {
     rpitx_unregister_alsa();
     unregister_char_device();
+    rpitx_unregister_sysfs_variables();
 }
 
 module_init(alsa_card_rpitx_init)
