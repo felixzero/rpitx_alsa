@@ -40,7 +40,7 @@ static struct platform_device *devices[SNDRV_CARDS];
 static struct snd_pcm_hardware rpitx_pcm_stereo_hw =
 {
     .info = SNDRV_PCM_INFO_INTERLEAVED,
-    .formats = SNDRV_PCM_FMTBIT_U8,
+    .formats = SNDRV_PCM_FMTBIT_S16_LE,
     .rates = SNDRV_PCM_RATE_8000_48000,
     .rate_min = 8000,
     .rate_max = 48000,
@@ -57,7 +57,7 @@ static struct snd_pcm_hardware rpitx_pcm_stereo_hw =
 static struct snd_pcm_hardware rpitx_pcm_mono_hw =
 {
     .info = SNDRV_PCM_INFO_INTERLEAVED,
-    .formats = SNDRV_PCM_FMTBIT_U8,
+    .formats = SNDRV_PCM_FMTBIT_S16_LE,
     .rates = SNDRV_PCM_RATE_8000_48000,
     .rate_min = 8000,
     .rate_max = 48000,
@@ -142,7 +142,8 @@ static int rpitx_pcm_trigger(struct snd_pcm_substream *ss, int cmd)
 /* Pointer callback returns the size of the used buffer */
 static snd_pcm_uframes_t rpitx_pcm_pointer(struct snd_pcm_substream *ss)
 {
-    return buffer_hw_pointer;
+    struct snd_pcm_runtime *runtime = ss->runtime;
+    return bytes_to_frames(runtime, buffer_hw_pointer);
 }
 
 
@@ -380,9 +381,7 @@ ssize_t rpitx_read_bytes_from_alsa_buffer(char *buffer, size_t len)
     
     /* If the buffer is not full enough, we don't read. */
     available_frames = snd_pcm_playback_hw_avail(ss->runtime);
-    if ((mydev->is_stereo_iq_open) && (available_frames < PERIOD_BYTES))
-        return 0;
-    else if (available_frames < PERIOD_BYTES / 2)
+    if (available_frames < PERIOD_BYTES)
         return 0;
 
     /* We do the actual copy */
@@ -390,10 +389,10 @@ ssize_t rpitx_read_bytes_from_alsa_buffer(char *buffer, size_t len)
         err = copy_to_user(buffer, ss->runtime->dma_area + buffer_hw_pointer, PERIOD_BYTES);
         buffer_hw_pointer += PERIOD_BYTES;
     } else {
-        for (i = 0; i < PERIOD_BYTES / 2; i++) {
-            put_user(ss->runtime->dma_area[buffer_hw_pointer], buffer + 2*i);   /* I = S */
-            put_user(0, buffer + 2*i + 1);                                      /* Q = 0 */
-            buffer_hw_pointer++;
+        for (i = 0; i < PERIOD_BYTES / 4; i++) {
+            err = copy_to_user(buffer + 4*i, ss->runtime->dma_area + buffer_hw_pointer, 2);       /* I=S */
+            err = copy_to_user(buffer + 4*i + 2, ss->runtime->dma_area + buffer_hw_pointer, 2);   /* Q=S */
+            buffer_hw_pointer += 2;
         }
     }
     
