@@ -22,12 +22,12 @@
 #define INPUT_FILENAME "/dev/rpitxin"
 #define SYSFS_PATH "/sys/devices/rpitx"
 
-static bool running;
+static bool running = true, requiresReset = false;
 static float SetFrequency;
 static float SampleRate = 44100;
 static int Harmonic;
 
-static void read_frequency_and_harmonic();
+static bool read_frequency_and_harmonic();
 static int read_sys_variable(const char *name);
 static void terminate(int num);
 
@@ -35,7 +35,7 @@ int main(int argc, char **argv)
 {
     int iqfile = open(INPUT_FILENAME, O_RDONLY);
     if (iqfile < 0) {
-        printf("input file issue\n");
+        printf("Cannot open input. Are you root?\n");
         exit(-1);
     }
     
@@ -49,40 +49,55 @@ int main(int argc, char **argv)
     int FifoSize = IQBURST*4;
 
     read_frequency_and_harmonic();
-
-    iqdmasync iqtest(SetFrequency, SampleRate, 14, FifoSize, MODE_IQ);
-    iqtest.SetPLLMasterLoop(3, 4, 0);
-    std::complex<float> CIQBuffer[IQBURST];
-
-    running = true;
-
+    
     while (running) {
-        int CplxSampleNumber = 0;
-        static short IQBuffer[IQBURST * 2];
-        int nbread = read(iqfile, IQBuffer, sizeof(short) * IQBURST);
-        
-        if (nbread > 0) {
-            for(int i = 0; i < nbread/2; i++) {
-                CIQBuffer[CplxSampleNumber++] = std::complex<float>(IQBuffer[i*2] / 32768.0, IQBuffer[i*2 + 1] / 32768.0);
+        iqdmasync iqtest(SetFrequency, SampleRate, 14, FifoSize, MODE_IQ);
+        iqtest.SetPLLMasterLoop(3, 4, 0);
+        std::complex<float> CIQBuffer[IQBURST];
+        requiresReset = false;        
+
+        while (!requiresReset && running) {
+            int CplxSampleNumber = 0;
+            static short IQBuffer[IQBURST * 2];
+            int nbread = read(iqfile, IQBuffer, sizeof(short) * IQBURST) / sizeof(short);
+            
+            if ((nbread > 0) && running) {
+                for(int i = 0; i < nbread/2; i++) {
+                    CIQBuffer[CplxSampleNumber++] =
+                        std::complex<float>(IQBuffer[i*2] / 32768.0,
+                                            IQBuffer[i*2 + 1] / 32768.0);
+                }
+            } else {
+                iqtest.stop();
+                if (read_frequency_and_harmonic())
+                    requiresReset = true;
             }
-        } else {
-            iqtest.stop();
-            read_frequency_and_harmonic();
+            
+            iqtest.SetIQSamples(CIQBuffer, CplxSampleNumber, Harmonic);
         }
         
-        iqtest.SetIQSamples(CIQBuffer, CplxSampleNumber, Harmonic);
+        iqtest.stop();
     }
     
-    iqtest.stop();
     close(iqfile);
     
     return 0;
 }
 
-static void read_frequency_and_harmonic()
+static bool read_frequency_and_harmonic()
 {
-    SetFrequency = (float)read_sys_variable("frequency");
-    Harmonic = read_sys_variable("harmonic");
+    float NewFrequency, NewHarmonic;
+    
+    NewFrequency = (float)read_sys_variable("frequency");
+    NewHarmonic = read_sys_variable("harmonic");
+    
+    if ((NewFrequency != SetFrequency) || (NewHarmonic != Harmonic)) {
+        SetFrequency = NewFrequency;
+        Harmonic = NewHarmonic;
+        return true;
+    }
+    
+    return false;
 }
 
 static int read_sys_variable(const char *name)

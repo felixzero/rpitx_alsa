@@ -384,6 +384,8 @@ ssize_t rpitx_read_bytes_from_alsa_buffer(char *buffer, size_t len)
     if (available_frames < PERIOD_BYTES)
         return 0;
 
+    buffer_hw_pointer %= MAX_BUFFER;
+    
     /* We do the actual copy */
     if (mydev->is_stereo_iq_open) {
         err = copy_to_user(buffer, ss->runtime->dma_area + buffer_hw_pointer, PERIOD_BYTES);
@@ -395,8 +397,6 @@ ssize_t rpitx_read_bytes_from_alsa_buffer(char *buffer, size_t len)
             buffer_hw_pointer += 2;
         }
     }
-    
-    buffer_hw_pointer %= MAX_BUFFER;
     
     /* We tell ALSA we have emptied some of the buffer */
     snd_pcm_period_elapsed(ss);
