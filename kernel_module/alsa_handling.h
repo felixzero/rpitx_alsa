@@ -12,6 +12,8 @@
 #ifndef ALSA_HANDLING_H
 #define ALSA_HANDLING_H
 
+#include <linux/string.h>
+
 #define PERIOD_BYTES 256
 
 /* To be called at initialization of the module to init the sound devices. */

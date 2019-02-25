@@ -15,6 +15,7 @@
 #include <sound/initval.h>
 
 #include "alsa_handling.h"
+#include "iq_sample_generation.h"
 
 /* Basic configuration */
 #define SND_RPITX_DRIVER "snd_rpitx"
@@ -186,6 +187,8 @@ static int rpitx_pcm_open_mono(struct snd_pcm_substream *ss)
 
     mutex_unlock(&pdata->cable_lock);
 
+    clear_iq_sample_generation();
+    
     mydev->is_mono_usb_open = 1;
     return 0;
 }
@@ -364,7 +367,7 @@ void rpitx_unregister_alsa(void)
 ssize_t rpitx_read_bytes_from_alsa_buffer(char *buffer, size_t len)
 {
     unsigned long available_frames;
-    int err, i;
+    int err;
     struct snd_pcm_substream *ss = NULL;
     
     /* Pick the correct structure, depending on the open device */
@@ -388,14 +391,15 @@ ssize_t rpitx_read_bytes_from_alsa_buffer(char *buffer, size_t len)
     
     /* We do the actual copy */
     if (mydev->is_stereo_iq_open) {
-        err = copy_to_user(buffer, ss->runtime->dma_area + buffer_hw_pointer, PERIOD_BYTES);
+        err = copy_to_user(buffer,
+                           ss->runtime->dma_area + buffer_hw_pointer,
+                           PERIOD_BYTES);
         buffer_hw_pointer += PERIOD_BYTES;
     } else {
-        for (i = 0; i < PERIOD_BYTES / 4; i++) {
-            err = copy_to_user(buffer + 4*i, ss->runtime->dma_area + buffer_hw_pointer, 2);       /* I=S */
-            err = copy_to_user(buffer + 4*i + 2, ss->runtime->dma_area + buffer_hw_pointer, 2);   /* Q=S */
-            buffer_hw_pointer += 2;
-        }
+        process_iq_period(buffer,
+                          ss->runtime->dma_area + buffer_hw_pointer);
+        buffer_hw_pointer += PERIOD_BYTES;
+        
     }
     
     /* We tell ALSA we have emptied some of the buffer */
