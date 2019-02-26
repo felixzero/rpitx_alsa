@@ -44,7 +44,7 @@ void process_iq_period(char __user *out_buffer, const char *in_buffer)
             q_sample += FIR_HILBERT(j - i + 2 * NUMBER_OF_SAMPLES, period3[j]);
         
         put_user(period2[i], iq_data + 2 * i);
-        put_user((int16_t)(q_sample >> 16), iq_data + 2 * i + 1);
+        put_user((int16_t)((-q_sample) >> 16), iq_data + 2 * i + 1);
     }
     
     for (i = 0; i < NUMBER_OF_SAMPLES; i++) {

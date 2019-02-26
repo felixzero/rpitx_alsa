@@ -50,10 +50,10 @@ int main(int argc, char **argv)
 
     read_frequency_and_harmonic();
     
+    std::complex<float> CIQBuffer[IQBURST];
     while (running) {
         iqdmasync iqtest(SetFrequency, SampleRate, 14, FifoSize, MODE_IQ);
         iqtest.SetPLLMasterLoop(3, 4, 0);
-        std::complex<float> CIQBuffer[IQBURST];
         requiresReset = false;        
 
         while (!requiresReset && running) {
@@ -67,13 +67,15 @@ int main(int argc, char **argv)
                         std::complex<float>(IQBuffer[i*2] / 32768.0,
                                             IQBuffer[i*2 + 1] / 32768.0);
                 }
+                
+                iqtest.SetIQSamples(CIQBuffer, CplxSampleNumber, Harmonic);
             } else {
                 iqtest.stop();
+                iqtest.disableclk(4);
+                
                 if (read_frequency_and_harmonic())
                     requiresReset = true;
             }
-            
-            iqtest.SetIQSamples(CIQBuffer, CplxSampleNumber, Harmonic);
         }
         
         iqtest.stop();

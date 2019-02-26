@@ -398,7 +398,7 @@ ssize_t rpitx_read_bytes_from_alsa_buffer(char *buffer, size_t len)
     } else {
         process_iq_period(buffer,
                           ss->runtime->dma_area + buffer_hw_pointer);
-        buffer_hw_pointer += PERIOD_BYTES;
+        buffer_hw_pointer += PERIOD_BYTES / 2;
         
     }
     
