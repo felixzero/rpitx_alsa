@@ -8,14 +8,19 @@ This program is comprised of a kernel module, whose job is to collect the audio 
 
 ## Compile and install
 
-First, I assume you have already tried the "regular" rpitx and everything has been configured properly on your Pi. 
+First, I assume you have already tried the "regular" rpitx and everything has been configured properly on your Pi. I.e., follow all the instructions of rpitx first: https://github.com/F5OEO/rpitx.
 
 Then, you need to clone this repository. Since it depends on the F5OEO's "librpitx" repository, you need to run:
 ```
 $ git clone --recursive https://github.com/felixzero/rpitx_alsa.git
 ```
 
-Then you need to build the kernel module (the ALSA driver). You need the kernel headers and of course, gcc. Run:
+Then you need to build the kernel module (the ALSA driver). You need the kernel headers and of course, gcc. But you need to make sure your system is up-to-date first, otherwise the build will fail. Run:
+```
+sudo apt update
+sudo apt upgrade
+```
+And reboot if any significant update was done. Then, run:
 
 ```
 $ sudo apt install raspberrypi-kernel-headers
@@ -24,6 +29,7 @@ $ sudo apt install raspberrypi-kernel-headers
 Then:
 
 ```
+$ cd rpitx_alsa/
 $ cd kernel_module/
 $ make
 ```
